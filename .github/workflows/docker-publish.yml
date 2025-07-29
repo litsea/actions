@@ -1,0 +1,93 @@
+# https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images
+
+name: Docker Package
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        required: false
+        type: string
+        description: 'Container registry to push the Docker image to'
+        default: 'ghcr.io'
+      image_name:
+        required: false
+        type: string
+        description: 'Name of the Docker image to build'
+        default: '${{ github.repository }}'
+      username:
+        required: false
+        type: string
+        description: 'Username for the Docker registry'
+        default: '${{ github.actor }}'
+      password:
+        required: false
+        type: string
+        description: 'Password for the Docker registry'
+        default: '${{ secrets.GITHUB_TOKEN }}'
+      dockerfile:
+        required: false
+        type: string
+        description: 'Path to the Dockerfile to build'
+        default: './Dockerfile'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    # Sets the permissions granted to the GITHUB_TOKEN for the actions in this job.
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # https://github.com/docker/login-action
+      - name: Log in to the Container registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ inputs.username }}
+          # https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication
+          password: ${{ inputs.password }}
+
+      # https://github.com/docker/metadata-action
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ${{ inputs.registry }}/${{ inputs.image_name }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            # set latest tag for main branch
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=ref,event=tag
+            type=sha
+
+      # https://github.com/docker/build-push-action
+      # For pull request, only ensures that the docker build succeeds, does not push the image.
+      # See: https://github.com/docker/build-push-action/issues/751
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          file: ${{ inputs.dockerfile }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # https://github.com/actions/attest-build-provenance
+      - name: Generate artifact attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ inputs.registry }}/${{ inputs.image_name}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          # https://github.com/actions/attest-build-provenance/issues/71#issuecomment-2108140285
+          push-to-registry: false
