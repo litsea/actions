@@ -21,10 +21,9 @@ on:
         description: 'Username for the Docker registry'
         default: '${{ github.actor }}'
       password:
-        required: false
+        required: true
         type: string
         description: 'Password for the Docker registry'
-        default: '${{ secrets.GITHUB_TOKEN }}'
       dockerfile:
         required: false
         type: string
